@@ -24,7 +24,7 @@ PRICES = {
 FREE_PERIOD_DAYS = 3
 
 # URL панели для подписок
-PANEL_URL = "https://heompvpn.pro:2096"
+PANEL_URL = "qwdwefwe.com"
 
 # Путь для подписок
 SUBSCRIPTION_PATH = "connect"
