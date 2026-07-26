@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ if .subTitle }}{{ .subTitle }}{{ else }}DubikVPN{{ end }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <style>
+        :root {
+            --bg: #0B0D0E;
+            --surface: #141618;
+            --surface-hover: #1a1d1f;
+            --border: rgba(212, 163, 115, 0.12);
+            --border-hover: rgba(212, 163, 115, 0.35);
+            --border-active: rgba(212, 163, 115, 0.5);
+            --gold: #D4A373;
+            --gold-dim: rgba(212, 163, 115, 0.6);
+            --text: #FFFFFF;
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --text-muted: rgba(255, 255, 255, 0.35);
+            --radius: 14px;
+            --radius-sm: 10px;
+            --transition: 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1.5rem;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container { width: 100%; max-width: 720px; margin: 0 auto; }
+
+        .header { text-align: center; margin-bottom: 1.5rem; }
+        .logo {
+            width: 56px; height: 56px; margin: 0 auto 1rem;
+            background: linear-gradient(135deg, rgba(212, 163, 115, 0.18), rgba(212, 163, 115, 0.05));
+            border: 1px solid var(--border); border-radius: 16px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; font-weight: 700; color: var(--gold); letter-spacing: -0.04em;
+        }
+        .brand-name { font-size: 1.8rem; font-weight: 600; letter-spacing: -0.04em; color: var(--text); margin-bottom: 0.2rem; }
+        .brand-name span { color: var(--gold); }
+        .subtitle { font-size: 0.85rem; font-weight: 400; color: var(--text-secondary); letter-spacing: 0.02em; }
+
+        .status-badge {
+            display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.9rem;
+            border-radius: 100px; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.04em;
+            text-transform: uppercase; margin-top: 0.6rem;
+        }
+        .status-active { background: rgba(52, 199, 89, 0.1); color: #34C759; border: 1px solid rgba(52, 199, 89, 0.2); }
+        .status-inactive { background: rgba(255, 69, 58, 0.1); color: #FF453A; border: 1px solid rgba(255, 69, 58, 0.2); }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+        /* Статистика */
+        .stats-row {
+            display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;
+            margin-bottom: 0.5rem; font-size: 0.7rem; color: var(--text-muted);
+        }
+        .stats-row span { color: var(--gold-dim); }
+
+        .nav-links { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; margin-bottom: 1.5rem; }
+        .nav-link {
+            display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.5rem 0.9rem;
+            background: var(--surface); border: 1px solid var(--border); border-radius: 100px;
+            color: var(--text-secondary); text-decoration: none; font-size: 0.75rem; font-weight: 500;
+            letter-spacing: 0.02em; transition: all var(--transition);
+        }
+        .nav-link:hover { border-color: var(--gold); color: var(--gold); background: rgba(212, 163, 115, 0.05); }
+        .nav-link svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+        .platform-selector { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+        .platform-btn {
+            display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.65rem 1.1rem;
+            background: var(--surface); border: 1px solid var(--border); border-radius: 100px;
+            color: var(--text-secondary); cursor: pointer; font-size: 0.82rem; font-weight: 500;
+            letter-spacing: 0.02em; transition: all var(--transition); white-space: nowrap;
+            user-select: none; text-decoration: none; outline: none;
+        }
+        .platform-btn:hover { border-color: var(--border-hover); color: var(--text); background: var(--surface-hover); }
+        .platform-btn.active { border-color: var(--border-active); color: var(--gold); background: rgba(212, 163, 115, 0.1); box-shadow: 0 0 16px rgba(212, 163, 115, 0.08); }
+        .platform-btn svg { width: 18px; height: 18px; flex-shrink: 0; pointer-events: none; }
+        .platform-btn span { pointer-events: none; }
+
+        .platform-section { display: none; }
+        .platform-section.active { display: block; }
+
+        .section { margin-bottom: 1.5rem; }
+        .section-number {
+            display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+            border-radius: 50%; background: rgba(212, 163, 115, 0.12); color: var(--gold);
+            font-size: 0.75rem; font-weight: 600; margin-right: 0.6rem; flex-shrink: 0;
+        }
+        .section-title { font-size: 1rem; font-weight: 600; letter-spacing: -0.02em; color: var(--text); margin-bottom: 0.8rem; display: flex; align-items: center; }
+
+        .apps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; }
+        @media (max-width: 600px) { .apps-grid { grid-template-columns: 1fr; } }
+
+        .app-card {
+            background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 1.2rem; text-align: center; transition: all var(--transition); text-decoration: none;
+            color: inherit; display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
+        }
+        .app-card:hover { border-color: var(--border-hover); background: var(--surface-hover); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+        .app-icon {
+            width: 44px; height: 44px; border-radius: 12px; background: rgba(212, 163, 115, 0.1);
+            display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; color: var(--gold);
+        }
+        .app-name { font-size: 0.9rem; font-weight: 600; letter-spacing: -0.02em; color: var(--text); }
+        .app-store { font-size: 0.7rem; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .app-note { font-size: 0.65rem; color: #FF9F0A; line-height: 1.4; margin-top: 0.1rem; }
+        .available-badge { font-size: 0.65rem; color: #34C759; margin-top: 0.1rem; }
+
+        .subscribe-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.2rem; }
+        .subscribe-card p { font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.8rem; line-height: 1.6; }
+        .subscribe-card code { background: rgba(255, 255, 255, 0.05); padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.78rem; color: var(--gold); }
+        .url-copy-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+        .url-input {
+            flex: 1; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); padding: 0.7rem 0.9rem; color: var(--text);
+            font-family: 'Inter', monospace; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; user-select: all; word-break: break-all;
+        }
+        .btn-copy {
+            padding: 0.7rem 1.1rem; background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer;
+            font-size: 0.8rem; font-weight: 500; font-family: 'Inter', sans-serif; transition: all var(--transition); white-space: nowrap;
+        }
+        .btn-copy:hover { border-color: var(--gold); color: var(--gold); background: rgba(212, 163, 115, 0.06); }
+        .btn-copy.copied { border-color: #34C759; color: #34C759; background: rgba(52, 199, 89, 0.08); }
+        
+        .app-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .btn-app {
+            display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.9rem;
+            background: rgba(212, 163, 115, 0.08); border: 1px solid var(--border); border-radius: 100px;
+            color: var(--gold); text-decoration: none; font-size: 0.75rem; font-weight: 500;
+            letter-spacing: 0.02em; transition: all var(--transition);
+        }
+        .btn-app:hover { background: rgba(212, 163, 115, 0.15); border-color: var(--border-hover); transform: translateY(-1px); }
+
+        .qr-section { text-align: center; }
+        .qr-container {
+            display: inline-block; background: #FFFFFF; padding: 0.8rem; border-radius: var(--radius);
+            margin-top: 0.6rem; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+        .qr-container canvas, .qr-container img { display: block; }
+
+        .footer {
+            text-align: center; font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.03em;
+            margin-top: 2rem; padding-top: 1.2rem; border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .footer a { color: var(--gold-dim); text-decoration: none; transition: color var(--transition); }
+        .footer a:hover { color: var(--gold); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Шапка -->
+        <div class="header">
+            <div class="logo">D</div>
+            <h1 class="brand-name">{{ if .subTitle }}{{ .subTitle }}{{ else }}Dubik<span>VPN</span>{{ end }}</h1>
+            <p class="subtitle">Быстрый · Безопасный · Безлимитный</p>
+            {{ if .enabled }}
+            <div class="status-badge status-active"><span class="status-dot"></span> Активна</div>
+            {{ else }}
+            <div class="status-badge status-inactive"><span class="status-dot"></span> Неактивна</div>
+            {{ end }}
+            <div class="stats-row" style="margin-top: 0.5rem;">
+                {{ if .used }}Использовано: <span>{{ .used }}</span> · {{ end }}
+                {{ if .remained }}Осталось: <span>{{ .remained }}</span> · {{ end }}
+                {{ if .total }}Лимит: <span>{{ .total }}</span>{{ end }}
+            </div>
+            {{ if .expire }}
+            <div class="stats-row">
+                {{ if eq .expire 0 }}
+                Срок действия: <span>Бессрочно</span>
+                {{ else }}
+                Срок действия: <span id="expire-date">{{ .expire }}</span>
+                {{ end }}
+            </div>
+            {{ end }}
+        </div>
+
+        <!-- Навигация -->
+        <div class="nav-links">
+            <a href="https://www.heompvpn.pro" target="_blank" rel="noopener" class="nav-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                Сайт
+            </a>
+            <a href="https://t.me/dubikvpn_bot" target="_blank" rel="noopener" class="nav-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Купить подписку
+            </a>
+            <a href="https://t.me/dubikvpn_channel" target="_blank" rel="noopener" class="nav-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                Канал
+            </a>
+            {{ if .subSupportUrl }}
+            <a href="{{ .subSupportUrl }}" target="_blank" rel="noopener" class="nav-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                Поддержка
+            </a>
+            {{ end }}
+        </div>
+
+        <!-- Кнопки платформ -->
+        <div class="platform-selector" id="platform-selector">
+            <button class="platform-btn active" data-platform="android" id="btn-android" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="2" width="14" height="20" rx="3"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                <span>Android</span>
+            </button>
+            <button class="platform-btn" data-platform="windows" id="btn-windows" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="9" height="9"/><rect x="13" y="3" width="9" height="9"/><rect x="2" y="14" width="9" height="7"/><rect x="13" y="14" width="9" height="7"/></svg>
+                <span>Windows</span>
+            </button>
+            <button class="platform-btn" data-platform="ios" id="btn-ios" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a4 4 0 0 0-4 4v1H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/><circle cx="12" cy="14" r="2"/></svg>
+                <span>iOS</span>
+            </button>
+            <button class="platform-btn" data-platform="linux" id="btn-linux" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><path d="M8 10c0-1 2-2 4-2s4 1 4 2"/><path d="M10 14l.5 2h3l.5-2"/><path d="M12 6v1"/></svg>
+                <span>Linux</span>
+            </button>
+        </div>
+
+        <!-- Android -->
+        <div class="platform-section active" id="section-android">
+            <div class="section">
+                <div class="section-title"><span class="section-number">1</span> Скачайте приложение</div>
+                <div class="apps-grid">
+                    <a href="https://play.google.com/store/apps/details?id=com.v2ray.ang" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">v2</div><div class="app-name">v2RayNG</div><div class="app-store">Google Play</div>
+                    </a>
+                    <a href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">H</div><div class="app-name">Happ</div><div class="app-store">Google Play</div>
+                    </a>
+                    <a href="https://github.com/MatsuriDayo/NekoBoxForAndroid/releases" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">N</div><div class="app-name">NekoBox</div><div class="app-store">GitHub (APK)</div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Windows -->
+        <div class="platform-section" id="section-windows">
+            <div class="section">
+                <div class="section-title"><span class="section-number">1</span> Скачайте приложение</div>
+                <div class="apps-grid">
+                    <a href="https://github.com/2dust/v2rayN/releases" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">v2</div><div class="app-name">v2RayN</div><div class="app-store">GitHub</div>
+                    </a>
+                    <a href="https://github.com/happproxy/happ-windows/releases" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">H</div><div class="app-name">Happ</div><div class="app-store">GitHub</div>
+                    </a>
+                    <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">C</div><div class="app-name">Clash Verge</div><div class="app-store">GitHub</div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- iOS -->
+        <div class="platform-section" id="section-ios">
+            <div class="section">
+                <div class="section-title"><span class="section-number">1</span> Скачайте приложение</div>
+                <div class="apps-grid">
+                    <a href="https://apps.apple.com/app/happ-proxy-utility/id1586196445" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">H</div><div class="app-name">Happ</div><div class="app-store">App Store</div>
+                        <div class="app-note">Удалено из российского App Store.</div>
+                    </a>
+                    <a href="https://apps.apple.com/app/v2raytun/id1586196445" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">v2T</div><div class="app-name">v2RayTun</div><div class="app-store">App Store</div>
+                        <div class="app-note">Удалено из российского App Store.</div>
+                    </a>
+                    <a href="https://apps.apple.com/ru/app/incy/id1586196445" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">In</div><div class="app-name">incy</div><div class="app-store">App Store (RU)</div>
+                        <div class="available-badge">Доступно в России</div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Linux -->
+        <div class="platform-section" id="section-linux">
+            <div class="section">
+                <div class="section-title"><span class="section-number">1</span> Скачайте приложение</div>
+                <div class="apps-grid">
+                    <a href="https://github.com/happproxy/happ-linux/releases" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">H</div><div class="app-name">Happ</div><div class="app-store">GitHub (AppImage)</div>
+                    </a>
+                    <a href="https://github.com/MatsuriDayo/nekoray/releases" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">N</div><div class="app-name">NekoRay</div><div class="app-store">GitHub (AppImage)</div>
+                    </a>
+                    <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noopener" class="app-card">
+                        <div class="app-icon">C</div><div class="app-name">Clash Verge</div><div class="app-store">GitHub (AppImage)</div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Шаг 2: Подписка -->
+        <div class="section">
+            <div class="section-title"><span class="section-number">2</span> Добавьте подписку</div>
+            <div class="subscribe-card">
+                <p>Скопируйте ссылку и вставьте её вручную: в приложении нажмите <code>+</code> → <code>Вставить из буфера обмена</code>.</p>
+                <div class="url-copy-row">
+                    <div class="url-input" id="sub-url">{{ if .subUrl }}{{ .subUrl }}{{ else }}https://your-subscription-url{{ end }}</div>
+                    <button class="btn-copy" id="copy-btn" type="button">Копировать</button>
+                </div>
+                <p style="font-size: 0.78rem; margin-bottom: 0.6rem;">Либо нажмите кнопку — подписка добавится автоматически:</p>
+                <div class="app-buttons">
+                    <a href="#" class="btn-app" id="btn-happ">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Happ
+                    </a>
+                    <a href="#" class="btn-app" id="btn-v2ray">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> v2RayNG / v2RayN
+                    </a>
+                    <a href="#" class="btn-app" id="btn-clash">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Clash
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Шаг 3: QR-код -->
+        <div class="section qr-section">
+            <div class="section-title" style="justify-content: center;"><span class="section-number">3</span> Или отсканируйте QR-код</div>
+            <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.4rem;">Откройте в приложении добавление подписки по QR и наведите камеру.</p>
+            <div class="qr-container" id="qr-code"></div>
+        </div>
+
+        <!-- Футер -->
+        <div class="footer">
+            {{ if .subTitle }}{{ .subTitle }}{{ else }}DubikVPN{{ end }} · <a href="https://www.heompvpn.pro" target="_blank" rel="noopener">heompvpn.pro</a> · <a href="https://t.me/dubikvpn_bot" target="_blank" rel="noopener">@dubikvpn_bot</a>
+            {{ if .sId }}<br>ID подписки: <span style="color: var(--gold-dim);">{{ .sId }}</span>{{ end }}
+            {{ if .lastOnline }}
+            {{ if ne .lastOnline 0 }}
+            <br>Был онлайн: <span id="last-online" style="color: var(--gold-dim);">Загрузка...</span>
+            {{ end }}
+            {{ end }}
+        </div>
+    </div>
+
+    <script>
+        // ВСЕ ФУНКЦИИ ГЛОБАЛЬНЫЕ, БЕЗ ЗАМЫКАНИЙ GO-ШАБЛОНА
+        
+        function switchPlatform(name) {
+            // Убираем active со всех кнопок
+            var allBtns = document.querySelectorAll('.platform-btn');
+            for (var i = 0; i < allBtns.length; i++) {
+                allBtns[i].classList.remove('active');
+            }
+            
+            // Ставим active на нужную
+            var activeBtn = document.getElementById('btn-' + name);
+            if (activeBtn) activeBtn.classList.add('active');
+            
+            // Скрываем все секции
+            var allSections = document.querySelectorAll('.platform-section');
+            for (var j = 0; j < allSections.length; j++) {
+                allSections[j].classList.remove('active');
+            }
+            
+            // Показываем нужную
+            var activeSection = document.getElementById('section-' + name);
+            if (activeSection) activeSection.classList.add('active');
+        }
+
+        function copyUrl() {
+            var urlEl = document.getElementById('sub-url');
+            var url = '';
+            if (urlEl) url = urlEl.textContent || urlEl.innerText || '';
+            url = url.trim();
+            
+            var btn = document.getElementById('copy-btn');
+            var textarea = document.createElement('textarea');
+            textarea.value = url;
+            textarea.style.position = 'fixed';
+            textarea.style.top = '0';
+            textarea.style.left = '0';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            
+            var copied = false;
+            try {
+                copied = document.execCommand('copy');
+            } catch (e) {
+                copied = false;
+            }
+            
+            document.body.removeChild(textarea);
+            
+            if (btn) {
+                btn.classList.add('copied');
+                btn.textContent = '✓ Скопировано';
+                setTimeout(function() {
+                    btn.classList.remove('copied');
+                    btn.textContent = 'Копировать';
+                }, 2000);
+            }
+            
+            if (!copied && navigator.clipboard) {
+                navigator.clipboard.writeText(url).then(function() {
+                    if (btn) {
+                        btn.classList.add('copied');
+                        btn.textContent = '✓ Скопировано';
+                        setTimeout(function() {
+                            btn.classList.remove('copied');
+                            btn.textContent = 'Копировать';
+                        }, 2000);
+                    }
+                }).catch(function() {});
+            }
+        }
+
+        function initAll() {
+            // Кнопки платформ
+            var btnAndroid = document.getElementById('btn-android');
+            var btnWindows = document.getElementById('btn-windows');
+            var btnIos = document.getElementById('btn-ios');
+            var btnLinux = document.getElementById('btn-linux');
+            
+            if (btnAndroid) btnAndroid.onclick = function() { switchPlatform('android'); };
+            if (btnWindows) btnWindows.onclick = function() { switchPlatform('windows'); };
+            if (btnIos) btnIos.onclick = function() { switchPlatform('ios'); };
+            if (btnLinux) btnLinux.onclick = function() { switchPlatform('linux'); };
+            
+            // Копирование
+            var copyBtn = document.getElementById('copy-btn');
+            if (copyBtn) copyBtn.onclick = copyUrl;
+            
+            // QR-код
+            var subUrlEl = document.getElementById('sub-url');
+            var subUrl = '';
+            if (subUrlEl) subUrl = (subUrlEl.textContent || subUrlEl.innerText || '').trim();
+            
+            if (subUrl && subUrl !== 'https://your-subscription-url' && typeof QRCode !== 'undefined') {
+                var qrContainer = document.getElementById('qr-code');
+                if (qrContainer) {
+                    new QRCode(qrContainer, {
+                        text: subUrl,
+                        width: 160,
+                        height: 160,
+                        colorDark: '#0B0D0E',
+                        colorLight: '#FFFFFF',
+                        correctLevel: QRCode.CorrectLevel.M
+                    });
+                }
+            }
+            
+            // Кнопки приложений (deep links)
+            if (subUrl) {
+                var encodedUrl = encodeURIComponent(subUrl);
+                var btnHapp = document.getElementById('btn-happ');
+                var btnV2ray = document.getElementById('btn-v2ray');
+                var btnClash = document.getElementById('btn-clash');
+                
+                if (btnHapp) btnHapp.href = 'happ://import?url=' + encodedUrl;
+                if (btnV2ray) btnV2ray.href = 'v2rayng://import?url=' + encodedUrl;
+                if (btnClash) btnClash.href = 'clash://install-config?url=' + encodedUrl;
+            }
+            
+            // Дата истечения
+            var expireEl = document.getElementById('expire-date');
+            if (expireEl) {
+                var expireText = expireEl.textContent || expireEl.innerText || '';
+                var expireTs = parseInt(expireText);
+                if (expireTs && expireTs > 0) {
+                    var d = new Date(expireTs * 1000);
+                    var day = String(d.getDate()).padStart(2, '0');
+                    var month = String(d.getMonth() + 1).padStart(2, '0');
+                    var year = d.getFullYear();
+                    expireEl.textContent = day + '.' + month + '.' + year;
+                    
+                    var now = Date.now();
+                    var daysLeft = Math.ceil((expireTs * 1000 - now) / (1000 * 60 * 60 * 24));
+                    if (daysLeft <= 7 && daysLeft > 0) {
+                        expireEl.style.color = '#FF9F0A';
+                    } else if (daysLeft <= 0) {
+                        expireEl.textContent = 'Истекла';
+                        expireEl.style.color = '#FF453A';
+                    }
+                }
+            }
+            
+            // lastOnline
+            var lastOnlineEl = document.getElementById('last-online');
+            if (lastOnlineEl) {
+                var lastOnlineText = lastOnlineEl.textContent || lastOnlineEl.innerText || '';
+                // Данные уже в миллисекундах от Go-шаблона
+                {{ if .lastOnline }}
+                var lastOnlineMs = {{ .lastOnline }};
+                if (lastOnlineMs && lastOnlineMs > 0) {
+                    var d2 = new Date(lastOnlineMs);
+                    var day2 = String(d2.getDate()).padStart(2, '0');
+                    var month2 = String(d2.getMonth() + 1).padStart(2, '0');
+                    var year2 = d2.getFullYear();
+                    var hours2 = String(d2.getHours()).padStart(2, '0');
+                    var minutes2 = String(d2.getMinutes()).padStart(2, '0');
+                    lastOnlineEl.textContent = day2 + '.' + month2 + '.' + year2 + ' ' + hours2 + ':' + minutes2;
+                }
+                {{ end }}
+            }
+        }
+
+        // Запуск
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initAll);
+        } else {
+            initAll();
+        }
+    </script>
+</body>
+</html>

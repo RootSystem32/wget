@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление IP - DubikVPN</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e17;
+            color: #e0e0e0;
+            padding: 40px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00d4ff;
+        }
+        .ip-list {
+            list-style: none;
+            padding: 0;
+        }
+        .ip-item {
+            background: #1a1f2e;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #2a3040;
+        }
+        .ip-item .ip {
+            font-weight: 600;
+        }
+        .ip-item .delete-btn {
+            background: #ff6b6b;
+            color: #fff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+        .ip-item .delete-btn:hover {
+            background: #ff4444;
+        }
+        .add-form {
+            background: #1a1f2e;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #2a3040;
+            margin-top: 20px;
+        }
+        .add-form input {
+            background: #0d121f;
+            border: 1px solid #2a3040;
+            color: #e0e0e0;
+            padding: 10px 16px;
+            border-radius: 8px;
+            width: 70%;
+            margin-right: 10px;
+        }
+        .add-form button {
+            background: #00d4ff;
+            color: #0a0e17;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .add-form button:hover {
+            background: #66e5ff;
+        }
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #00d4ff;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .notice {
+            color: #8892a0;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Управление IP для входа</h1>
+    <p>Только IP из этого списка имеют доступ к статистике.</p>
+
+    <ul class="ip-list">
+        {% for ip in ips %}
+        <li class="ip-item">
+            <span class="ip">{{ ip }}</span>
+            <form method="POST" action="/admin/remove/{{ ip }}" style="display:inline;">
+                <button type="submit" class="delete-btn" {% if loop.length <= 1 %}disabled title="Нельзя удалить последний IP"{% endif %}>Удалить</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+
+    <div class="add-form">
+        <h3>➕ Добавить IP</h3>
+        <form method="POST" action="/admin/add">
+            <input type="text" name="ip" placeholder="Например: 46.43.210.150" required>
+            <button type="submit">Добавить</button>
+        </form>
+        <div class="notice">⚠️ Добавленный IP сразу получит доступ к статистике.</div>
+    </div>
+
+    <a href="/" class="back-link">← Вернуться к статистике</a>
+</body>
+</html>
