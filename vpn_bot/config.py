@@ -1,10 +1,10 @@
 # config.py
 
 # Telegram Bot Token (получи у @BotFather)
-BOT_TOKEN = "8908846361:AAEcUqHXf5FV63ZOkFhs38JtA5pDdmEVqnY"
+BOT_TOKEN = ""
 
 # Твой Telegram ID (главный администратор)
-MAIN_ADMIN_ID = 1587332751
+MAIN_ADMIN_ID = 
 
 # Файлы для хранения данных
 USERS_FILE = "users.json"
