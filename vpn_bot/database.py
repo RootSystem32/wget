@@ -45,20 +45,33 @@ def get_next_client_number():
 
 # ========== Пользователи ==========
 def get_users():
-    return load_data("users.json", {})
+    users = load_data("users.json", {})
+    if 'None' in users:
+        del users['None']
+        save_data("users.json", users)
+    return users
 
 def get_user(user_id):
     users = get_users()
     return users.get(str(user_id), {})
 
 def save_user(user_id, user_data):
+    if user_id is None:
+        return
     users = get_users()
     users[str(user_id)] = user_data
     save_data("users.json", users)
 
 def get_all_users():
     users = get_users()
-    return [int(user_id) for user_id in users.keys()]
+    result = []
+    for user_id in users.keys():
+        try:
+            if user_id != 'None' and user_id is not None:
+                result.append(int(user_id))
+        except (ValueError, TypeError):
+            continue
+    return result
 
 # ========== Администраторы ==========
 def get_admins():
@@ -222,6 +235,8 @@ def get_user_transactions(user_id):
 
 # ========== Активность пользователей ==========
 def log_user_activity(user_id, action):
+    if user_id is None:
+        return
     user_data = get_user(user_id)
     if 'first_seen' not in user_data:
         user_data['first_seen'] = datetime.now().isoformat()
@@ -263,32 +278,36 @@ def auto_renew_subscriptions():
     renewed = []
     from config import PRICES
     for uid_str, user_data in users.items():
-        uid = int(uid_str)
-        balance = user_data.get('balance', 0)
-        for sub in user_data.get('subscriptions', []):
-            expiry = datetime.fromisoformat(sub['expiry_date'])
-            days_left = (expiry - now).days
-            if 0 <= days_left <= 2 and not sub.get('auto_renewed', False):
-                price = PRICES.get(sub.get('days', 30), 150)
-                if balance >= price:
-                    user_data['balance'] = balance - price
-                    server = get_server_by_id(sub['server_id'])
-                    if server and is_slot_available(server['id']):
+        try:
+            uid = int(uid_str)
+        except (ValueError, TypeError):
+            continue
+        try:
+            balance = user_data.get('balance', 0)
+            for sub in user_data.get('subscriptions', []):
+                expiry = datetime.fromisoformat(sub['expiry_date'])
+                days_left = (expiry - now).days
+                if 0 <= days_left <= 2 and not sub.get('auto_renewed', False):
+                    price = PRICES.get(sub.get('days', 30), 150)
+                    if balance >= price:
+                        user_data['balance'] = balance - price
                         from panel_api import create_subscription
-                        client_number = get_next_client_number()
-                        client_name = f"User {client_number}"
-                        client_email = str(client_number)
-                        result = create_subscription(server, client_email, sub.get('days', 30), client_name)
+                        result = create_subscription(None, None, sub.get('days', 30), f"User {uid}")
                         if result['success']:
                             sub['expiry_date'] = datetime.fromtimestamp(result['expiry_date']/1000).isoformat()
                             sub['auto_renewed'] = True
                             sub['sub_link'] = result['sub_link']
                             sub['client_id'] = result['client_id']
                             sub['client_number'] = result.get('client_number')
+                            sub['servers'] = result.get('servers', [])
+                            sub['servers_count'] = result.get('servers_count', 1)
                             add_transaction(uid, -price, 'subscription', f'Автопродление на {sub.get("days", 30)} дней')
                             renewed.append(uid)
                             save_user(uid, user_data)
-                            update_server_used_slots(server['id'])
+                            for server in get_servers():
+                                update_server_used_slots(server['id'])
+        except Exception as e:
+            print(f"Ошибка автопродления для {uid_str}: {e}")
     return renewed
 
 # ========== Генерация ID ==========
@@ -339,40 +358,34 @@ def get_system_stats():
     now = datetime.now()
     
     for uid_str, user_data in users.items():
-        uid = int(uid_str)
+        try:
+            uid = int(uid_str)
+        except (ValueError, TypeError):
+            continue
         total_balance += user_data.get('balance', 0)
-        
         if user_data.get('last_active'):
             last_active = datetime.fromisoformat(user_data['last_active'])
             if (now - last_active).days < 7:
                 active_users += 1
-        
         transactions = get_user_transactions(uid)
         total_spent += sum(t['amount'] for t in transactions if t['type'] == 'subscription')
-        
         activity = user_data.get('activity', [])
         starts = [a for a in activity if a.get('action') == 'start']
         total_starts += len(starts)
-        
         subs = user_data.get('subscriptions', [])
         paid_subs = [s for s in subs if not s.get('is_free', False)]
         total_purchases += len(paid_subs)
-        
         if subs:
             users_with_subs += 1
-        
         active_subs = [s for s in subs if datetime.fromisoformat(s['expiry_date']) > now]
         total_devices += len(active_subs)
-    
     total_active_subs = 0
     for user_data in users.values():
         for sub in user_data.get('subscriptions', []):
             if datetime.fromisoformat(sub['expiry_date']) > now:
                 total_active_subs += 1
-    
     if total_spent == float('inf') or total_spent == float('-inf'):
         total_spent = 0
-    
     return {
         'total_users': total_users,
         'active_users': active_users,
@@ -389,35 +402,28 @@ def get_users_list():
     users = get_users()
     result = []
     now = datetime.now()
-    
     for uid_str, user_data in users.items():
-        uid = int(uid_str)
+        try:
+            uid = int(uid_str)
+        except (ValueError, TypeError):
+            continue
         subs = user_data.get('subscriptions', [])
-        
         active_subs = [s for s in subs if datetime.fromisoformat(s['expiry_date']) > now]
-        
-        # Дней до окончания
         days_left = 0
         if active_subs:
             nearest_expiry = min([datetime.fromisoformat(s['expiry_date']) for s in active_subs])
             days_left = (nearest_expiry - now).days
-        
         transactions = get_user_transactions(uid)
         total_spent = sum(t['amount'] for t in transactions if t['type'] == 'subscription')
         total_topups = sum(t['amount'] for t in transactions if t['type'] == 'topup')
-        
-        # Исправляем Infinity
         if total_spent == float('inf') or total_spent == float('-inf'):
             total_spent = 0
         if total_topups == float('inf') or total_topups == float('-inf'):
             total_topups = 0
-        
         activity = user_data.get('activity', [])
         first_seen = user_data.get('first_seen')
         last_active = user_data.get('last_active')
-        
         purchases = len([s for s in subs if not s.get('is_free', False)])
-        
         result.append({
             'id': uid,
             'username': user_data.get('username', ''),
@@ -437,7 +443,6 @@ def get_users_list():
             'devices_count': len(active_subs),
             'devices_warning': len(active_subs) > 3
         })
-    
     result.sort(key=lambda x: x['last_active'] or '', reverse=True)
     return result
 
@@ -502,6 +507,18 @@ def search_user_by_id(search_query):
             if search_query in sub.get('sub_link', ''):
                 return user_id, user_data
     return None, None
+
+# ========== ПРОВЕРКА ПОДПИСКИ НА КАНАЛ ==========
+def is_user_verified(user_id):
+    """Проверяет, прошел ли пользователь проверку подписки"""
+    user_data = get_user(user_id)
+    return user_data.get('verified', False)
+
+def set_user_verified(user_id):
+    """Отмечает пользователя как прошедшего проверку"""
+    user_data = get_user(user_id)
+    user_data['verified'] = True
+    save_user(user_id, user_data)
 
 # ========== АЛИАСЫ ДЛЯ stats_web.py ==========
 db_get_user = get_user
