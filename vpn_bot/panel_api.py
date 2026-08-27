@@ -1,326 +1,168 @@
-# stats_web.py
-from flask import Flask, render_template, jsonify, request, redirect, url_for
+# panel_api.py
+import requests
 import json
-import os
+import uuid
 import secrets
-import re
+import string
+import random
 from datetime import datetime, timedelta
+from urllib3.exceptions import InsecureRequestWarning
+from config import PANEL_URL, SUBSCRIPTION_PATH
+from database import get_next_client_number, get_servers
 
-from database import (
-    get_users,
-    get_user,
-    get_user_transactions,
-    get_user_activity,
-    get_system_stats,
-    get_users_list,
-    save_user,
-    add_transaction,
-    load_data,
-    save_data
-)
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-app = Flask(__name__)
-app.secret_key = secrets.token_hex(16)
+def generate_sub_id(length=8):
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
 
-ALLOWED_IPS_FILE = "allowed_ips.json"
-DEFAULT_IP = "176.59.132.127"
-
-# ========== IP ==========
-def load_allowed_ips():
-    if os.path.exists(ALLOWED_IPS_FILE):
-        try:
-            with open(ALLOWED_IPS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            default_ips = [DEFAULT_IP]
-            save_allowed_ips(default_ips)
-            return default_ips
-    default_ips = [DEFAULT_IP]
-    save_allowed_ips(default_ips)
-    return default_ips
-
-def save_allowed_ips(ips):
-    with open(ALLOWED_IPS_FILE, 'w') as f:
-        json.dump(ips, f, indent=2)
-
-def ip_required(f):
-    from functools import wraps
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        client_ip = request.headers.get('X-Real-IP') or request.headers.get('X-Forwarded-For') or request.remote_addr
-        if ',' in client_ip:
-            client_ip = client_ip.split(',')[0].strip()
-        allowed = load_allowed_ips()
-        if client_ip not in allowed:
-            return f"⛔ Доступ запрещён. Ваш IP: {client_ip}", 403
-        return f(*args, **kwargs)
-    return decorated_function
-
-# ========== ГЛАВНАЯ ==========
-@app.route('/')
-@ip_required
-def stats_index():
-    return render_template('stats.html')
-
-# ========== API: СТАТИСТИКА ==========
-@app.route('/api/stats')
-@ip_required
-def api_stats():
+def create_subscription(server, telegram_id, days, client_name=None):
     try:
-        stats = get_system_stats()
+        all_servers = get_servers()
         
-        # Дополнительный подсчёт дохода от подписок
-        users = get_users()
-        total_revenue = 0
-        total_revenue_topups = 0
+        if not all_servers:
+            return {'success': False, 'error': 'Нет доступных серверов'}
         
-        for uid_str, user_data in users.items():
-            uid = int(uid_str)
-            transactions = get_user_transactions(uid)
-            for t in transactions:
-                if t['type'] == 'subscription':
-                    total_revenue += abs(t['amount'])
-                elif t['type'] == 'topup':
-                    total_revenue_topups += t['amount']
+        client_number = get_next_client_number()
+        client_uuid = str(uuid.uuid4())
+        sub_id = generate_sub_id(16)
         
-        stats['total_revenue'] = total_revenue
-        stats['total_revenue_topups'] = total_revenue_topups
-        stats['profit'] = total_revenue_topups - total_revenue
+        all_inbound_ids = []
+        for s in all_servers:
+            inbound_ids = s.get('inbound_ids', [])
+            all_inbound_ids.extend(inbound_ids)
         
-        return jsonify(stats)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        if not all_inbound_ids:
+            return {'success': False, 'error': 'Нет инбаундов на серверах'}
+        
+        main_server = all_servers[0]
+        base_url = main_server['url'].rstrip('/')
+        api_token = main_server['api_token']
+        
+        # EMAIL = ТЕЛЕГРАМ ID (просто число)
+        email = str(telegram_id)
+        
+        expiry_time = int((datetime.now() + timedelta(days=days)).timestamp() * 1000)
 
-# ========== API: ПОЛЬЗОВАТЕЛИ ==========
-@app.route('/api/users')
-@ip_required
-def api_users():
+        client_data = {
+            "id": client_uuid,
+            "email": email,
+            "subId": sub_id,
+            "flow": "xtls-rprx-vision",
+            "fingerprint": "chrome",
+            "security": "auto",
+            "totalGB": 0,
+            "expiryTime": expiry_time,
+            "enable": True,
+            "comment": f"User_{client_number}"
+        }
+
+        payload = {
+            "client": client_data,
+            "inboundIds": all_inbound_ids
+        }
+
+        headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(
+            f"{base_url}/panel/api/clients/add",
+            headers=headers,
+            json=payload,
+            verify=False,
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            return {'success': False, 'error': f'HTTP {response.status_code}: {response.text[:200]}'}
+
+        result = response.json()
+        if not result.get('success'):
+            error_msg = result.get('msg', 'Unknown error')
+            if 'email' in str(error_msg).lower() or 'already' in str(error_msg).lower():
+                # Если email уже существует, добавляем суффикс
+                email = f"{telegram_id}_{random.randint(1, 999)}"
+                client_data["email"] = email
+                payload = {
+                    "client": client_data,
+                    "inboundIds": all_inbound_ids
+                }
+                response = requests.post(
+                    f"{base_url}/panel/api/clients/add",
+                    headers=headers,
+                    json=payload,
+                    verify=False,
+                    timeout=30
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        return process_success_result(result, client_data, all_servers, sub_id, client_number, email, expiry_time, telegram_id, days)
+            return {'success': False, 'error': f'Ошибка панели: {error_msg}'}
+
+        return process_success_result(result, client_data, all_servers, sub_id, client_number, email, expiry_time, telegram_id, days)
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+def process_success_result(result, client_data, all_servers, sub_id, client_number, email, expiry_time, telegram_id, days):
+    main_server = all_servers[0]
+    link_base = main_server.get('link_url', main_server['url'])
+    sub_link = f"{link_base}/{SUBSCRIPTION_PATH}/{sub_id}"
+    
+    # Получаем список серверов для сохранения
+    servers_list = []
+    for s in all_servers:
+        servers_list.append(s.get('name', f"Server {s.get('id', '')}"))
+    
+    from database import save_user, get_user
+    user_data = get_user(telegram_id)
+    if 'subscriptions' not in user_data:
+        user_data['subscriptions'] = []
+    
+    user_data['subscriptions'].append({
+        'purchase_date': datetime.now().isoformat(),
+        'expiry_date': datetime.fromtimestamp(expiry_time / 1000).isoformat(),
+        'days': days,
+        'sub_link': sub_link,
+        'sub_id': sub_id,
+        'uuid': client_data["id"],
+        'client_number': client_number,
+        'email': email,
+        'servers': servers_list,
+        'servers_count': len(all_servers)
+    })
+    save_user(telegram_id, user_data)
+    
+    return {
+        'success': True,
+        'sub_link': sub_link,
+        'expiry_date': expiry_time,
+        'client_id': client_number,
+        'client_number': client_number,
+        'sub_id': sub_id,
+        'uuid': client_data["id"],
+        'email': email,
+        'servers': servers_list,
+        'servers_count': len(all_servers)
+    }
+
+def test_server_connection(server):
     try:
-        users = get_users_list()
-        return jsonify(users)
+        base_url = server['url'].rstrip('/')
+        api_token = server['api_token']
+        headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Accept": "application/json"
+        }
+        response = requests.get(f"{base_url}/panel/api/inbounds/list", headers=headers, verify=False, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('success'):
+                return {'success': True, 'msg': 'Подключение успешно'}
+        return {'success': False, 'msg': f'Ошибка: {response.status_code}'}
     except Exception as e:
-        print(f"API Users Error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# ========== API: ПОЛЬЗОВАТЕЛЬ (ПОЛНЫЕ ДАННЫЕ + ИСТОРИЯ) ==========
-@app.route('/api/user/<int:user_id>')
-@ip_required
-def api_user(user_id):
-    try:
-        user_data = get_user(user_id)
-        if not user_data:
-            return jsonify({'error': 'User not found'}), 404
-        
-        transactions = get_user_transactions(user_id)
-        activity = get_user_activity(user_id)
-        subs = user_data.get('subscriptions', [])
-        now = datetime.now()
-        
-        active_subs = [s for s in subs if datetime.fromisoformat(s['expiry_date']) > now]
-        
-        # Подсчёт дохода от этого пользователя
-        total_spent = sum(abs(t['amount']) for t in transactions if t['type'] == 'subscription')
-        total_topups = sum(t['amount'] for t in transactions if t['type'] == 'topup')
-        
-        return jsonify({
-            'user': {
-                'id': user_id,
-                'username': user_data.get('username', ''),
-                'first_name': user_data.get('first_name', ''),
-                'balance': user_data.get('balance', 0),
-                'first_seen': user_data.get('first_seen'),
-                'last_active': user_data.get('last_active'),
-                'got_free': user_data.get('got_free', False),
-                'total_spent': total_spent,
-                'total_topups': total_topups,
-                'profit': total_topups - total_spent
-            },
-            'subscriptions': {
-                'active': active_subs,
-                'expired': [],
-                'total': len(subs)
-            },
-            'transactions': transactions[-20:],
-            'activity': activity,  # ВСЯ активность, не только последние 20
-            'stats': {
-                'total_actions': len(activity),
-                'devices_count': len(active_subs),
-                'devices_warning': len(active_subs) > 3
-            }
-        })
-    except Exception as e:
-        print(f"API User Error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# ========== API: ДОХОД ==========
-@app.route('/api/revenue')
-@ip_required
-def api_revenue():
-    try:
-        users = get_users()
-        total_revenue = 0
-        total_topups = 0
-        subscription_count = 0
-        
-        for uid_str, user_data in users.items():
-            uid = int(uid_str)
-            transactions = get_user_transactions(uid)
-            for t in transactions:
-                if t['type'] == 'subscription':
-                    total_revenue += abs(t['amount'])
-                    subscription_count += 1
-                elif t['type'] == 'topup':
-                    total_topups += t['amount']
-        
-        return jsonify({
-            'total_revenue': total_revenue,
-            'total_topups': total_topups,
-            'profit': total_topups - total_revenue,
-            'subscription_count': subscription_count
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ========== API: ПРЕВЫШЕНИЕ УСТРОЙСТВ ==========
-@app.route('/api/devices_warning')
-@ip_required
-def api_devices_warning():
-    try:
-        users = get_users()
-        now = datetime.now()
-        warnings = []
-        for uid_str, user_data in users.items():
-            uid = int(uid_str)
-            subs = user_data.get('subscriptions', [])
-            active_subs = [s for s in subs if datetime.fromisoformat(s['expiry_date']) > now]
-            if len(active_subs) > 3:
-                warnings.append({
-                    'user_id': uid,
-                    'username': user_data.get('username', ''),
-                    'first_name': user_data.get('first_name', ''),
-                    'devices': len(active_subs),
-                    'limit': 3
-                })
-        return jsonify(warnings)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ========== API: ГРАФИКИ ==========
-@app.route('/api/charts')
-@ip_required
-def api_charts():
-    try:
-        users = get_users()
-        users_by_day = {}
-        purchases_by_day = {}
-        revenue_by_day = {}
-        
-        for user_data in users.values():
-            if user_data.get('first_seen'):
-                date = datetime.fromisoformat(user_data['first_seen']).strftime('%Y-%m-%d')
-                users_by_day[date] = users_by_day.get(date, 0) + 1
-            for sub in user_data.get('subscriptions', []):
-                if not sub.get('is_free', False):
-                    date = datetime.fromisoformat(sub['purchase_date']).strftime('%Y-%m-%d')
-                    purchases_by_day[date] = purchases_by_day.get(date, 0) + 1
-                    revenue_by_day[date] = revenue_by_day.get(date, 0) + 150
-        
-        dates = sorted(set(list(users_by_day.keys()) + list(purchases_by_day.keys())))
-        return jsonify({
-            'dates': dates,
-            'users_by_day': [users_by_day.get(d, 0) for d in dates],
-            'purchases_by_day': [purchases_by_day.get(d, 0) for d in dates],
-            'revenue_by_day': [revenue_by_day.get(d, 0) for d in dates]
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ========== API: ДОБАВИТЬ БАЛАНС ==========
-@app.route('/api/user/<int:user_id>/add_balance', methods=['POST'])
-@ip_required
-def api_add_balance(user_id):
-    try:
-        data = request.json
-        amount = float(data.get('amount', 0))
-        if amount <= 0:
-            return jsonify({'error': 'Amount must be positive'}), 400
-        user_data = get_user(user_id)
-        if not user_data:
-            return jsonify({'error': 'User not found'}), 404
-        user_data['balance'] = user_data.get('balance', 0) + amount
-        save_user(user_id, user_data)
-        add_transaction(user_id, amount, 'topup', f'Администратор начислил {amount}₽')
-        return jsonify({'success': True, 'new_balance': user_data['balance']})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ========== API: УДАЛИТЬ ПОДПИСКУ ==========
-@app.route('/api/user/<int:user_id>/delete_sub/<int:sub_index>', methods=['POST'])
-@ip_required
-def api_delete_subscription(user_id, sub_index):
-    try:
-        user_data = get_user(user_id)
-        if not user_data:
-            return jsonify({'error': 'User not found'}), 404
-        subs = user_data.get('subscriptions', [])
-        if sub_index < 0 or sub_index >= len(subs):
-            return jsonify({'error': 'Subscription not found'}), 404
-        subs.pop(sub_index)
-        user_data['subscriptions'] = subs
-        save_user(user_id, user_data)
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ========== API: УДАЛИТЬ ПОЛЬЗОВАТЕЛЯ ==========
-@app.route('/api/user/<int:user_id>/delete', methods=['POST'])
-@ip_required
-def api_delete_user(user_id):
-    try:
-        users = get_users()
-        if str(user_id) not in users:
-            return jsonify({'error': 'User not found'}), 404
-        del users[str(user_id)]
-        save_data("users.json", users)
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ========== АДМИНКА IP ==========
-@app.route('/admin')
-@ip_required
-def admin_panel():
-    ips = load_allowed_ips()
-    return render_template('admin.html', ips=ips)
-
-@app.route('/admin/add', methods=['POST'])
-@ip_required
-def add_ip():
-    new_ip = request.form.get('ip')
-    if not new_ip:
-        return "IP не указан", 400
-    parts = new_ip.split('.')
-    if len(parts) != 4:
-        return "Неверный формат IP", 400
-    for p in parts:
-        if not p.isdigit() or int(p) < 0 or int(p) > 255:
-            return "Неверный формат IP", 400
-    ips = load_allowed_ips()
-    if new_ip not in ips:
-        ips.append(new_ip)
-        save_allowed_ips(ips)
-    return redirect(url_for('admin_panel'))
-
-@app.route('/admin/remove/<ip>', methods=['POST'])
-@ip_required
-def remove_ip(ip):
-    ips = load_allowed_ips()
-    if ip in ips:
-        if len(ips) <= 1:
-            return "Нельзя удалить последний IP", 400
-        ips.remove(ip)
-        save_allowed_ips(ips)
-    return redirect(url_for('admin_panel'))
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8444, debug=False)
+        return {'success': False, 'msg': str(e)}
