@@ -22,10 +22,10 @@ PRICES = {
 FREE_PERIOD_DAYS = 3
 
 # URL панели (используется как fallback)
-PANEL_URL = "https://nider.heompvpn.pro"
+PANEL_URL = "https://"
 
 # Путь для подписок
-SUBSCRIPTION_PATH = "connect"
+SUBSCRIPTION_PATH = ""
 
 # ========== ПРОВЕРКА ПОДПИСКИ НА КАНАЛ ==========
 # ID канала @DubikVPN (получить через @userinfobot)
