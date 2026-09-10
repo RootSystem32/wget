@@ -12,7 +12,7 @@ from telegram.request import HTTPXRequest
 
 from config import BOT_TOKEN, MAIN_ADMIN_ID, PRICES, FREE_PERIOD_DAYS, PANEL_URL, SUBSCRIPTION_PATH, CHANNEL_ID, CHANNEL_LINK, PROXY_URL, MAX_DEVICES
 from database import *
-from panel_api import create_subscription, test_server_connection, get_client_usage
+from panel_api import create_subscription, test_server_connection, get_client_usage, check_device_limit, delete_client
 import qrcode
 from io import BytesIO
 
@@ -73,7 +73,6 @@ async def send_with_banner(update_or_query, banner_name, text, keyboard=None, pa
     banner_path = f"banner/{banner_name}"
     is_callback = hasattr(update_or_query, 'edit_message_text')
     
-    # Если текст длиннее 1024 символов, отправляем без баннера
     if len(text) > 1024:
         if is_callback:
             await safe_edit_message(update_or_query, text, keyboard, parse_mode)
@@ -199,14 +198,32 @@ def get_user_tariff_info(user_data):
     return tariff, days_left, best_sub
 
 def clean_expired_subs(user_id):
+    """Удаляет истёкшие подписки и удаляет клиентов с панели"""
     user_data = get_user(user_id)
     now = datetime.now()
+    servers = get_servers()
+    
     if 'subscriptions' in user_data:
-        user_data['subscriptions'] = [
-            s for s in user_data['subscriptions']
-            if datetime.fromisoformat(s['expiry_date']) > now
-        ]
-        save_user(user_id, user_data)
+        active_subs = []
+        for s in user_data['subscriptions']:
+            try:
+                expiry = datetime.fromisoformat(s['expiry_date'])
+                if expiry > now:
+                    active_subs.append(s)
+                else:
+                    if servers and s.get('uuid'):
+                        try:
+                            delete_client(servers[0], s['uuid'])
+                            logging.info(f"Удалён клиент {s['uuid']} (истёкшая подписка)")
+                        except Exception as e:
+                            logging.error(f"Ошибка удаления клиента: {e}")
+            except Exception as e:
+                logging.error(f"Ошибка обработки подписки: {e}")
+        
+        if len(active_subs) != len(user_data['subscriptions']):
+            user_data['subscriptions'] = active_subs
+            save_user(user_id, user_data)
+    
     return user_data
 
 def get_unique_subs(user_data):
@@ -269,22 +286,55 @@ async def check_expiring_subs(context):
                 if 23 <= left <= 25 and not sub.get('warning_sent'):
                     sub['warning_sent'] = True
                     save_user(uid, u_data)
+                    
+                    days = sub.get('days', 30)
+                    price = PRICES.get(days, 150)
+                    balance = u_data.get('balance', 0)
+                    
+                    msg = (
+                        f"⚠️ ВНИМАНИЕ!\n\n"
+                        f"Ваша подписка истекает через 24 часа.\n\n"
+                        f"📅 Дата окончания: {expiry.strftime('%d.%m.%Y %H:%M')}\n\n"
+                        f"💰 Стоимость продления: {price}₽ ({days} дней)\n"
+                        f"💳 Ваш баланс: {balance}₽\n\n"
+                    )
+                    
+                    if balance >= price:
+                        msg += "✅ У вас достаточно средств — подписка будет автоматически продлена!"
+                    else:
+                        msg += (
+                            f"⚠️ Чтобы подписка автоматически продлилась, "
+                            f"пополните баланс на {price}₽ (стоимость вашей подписки)."
+                        )
+                    
                     try:
-                        await context.bot.send_message(uid, f"⚠️ ВНИМАНИЕ!\n\nВаша подписка истекает через 24 часа.\n\n📅 Дата окончания: {expiry.strftime('%d.%m.%Y %H:%M')}")
+                        await context.bot.send_message(uid, msg)
                     except:
                         pass
-        except:
-            pass
+        except Exception as e:
+            logging.error(f"Ошибка проверки истекающих подписок: {e}")
 
 async def auto_renew_check(context):
     renewed = auto_renew_subscriptions()
     if renewed:
-        for user_id in renewed:
+        for item in renewed:
             try:
-                user_data = get_user(user_id)
-                await context.bot.send_message(user_id, "🔄 ПОДПИСКА АВТОМАТИЧЕСКИ ПРОДЛЕНА!")
-            except:
-                pass
+                user_id = item['user_id']
+                days = item['days']
+                price = item['price']
+                new_balance = item['new_balance']
+                
+                msg = (
+                    f"🔄 ПОДПИСКА АВТОМАТИЧЕСКИ ПРОДЛЕНА!\n\n"
+                    f"✅ Ваша подписка была автоматически продлена на {days} дней.\n"
+                    f"💰 Списано с баланса: {price}₽\n"
+                    f"💰 Новый баланс: {new_balance}₽\n\n"
+                    f"Спасибо, что пользуетесь нашим сервисом! ❤️"
+                )
+                
+                await context.bot.send_message(user_id, msg)
+            except Exception as e:
+                logging.error(f"Ошибка уведомления о продлении: {e}")
 
 async def check_renewal_reminders(context):
     users = get_users()
@@ -310,7 +360,8 @@ async def check_renewal_reminders(context):
                             if balance >= price:
                                 msg += f"💰 На вашем балансе достаточно средств ({balance}₽)\n✅ Подписка будет автоматически продлена!"
                             else:
-                                msg += f"💰 На балансе: {balance}₽ (нужно {price}₽)\n💳 Пополните баланс!"
+                                msg += f"💰 На балансе: {balance}₽ (нужно {price}₽)\n"
+                                msg += f"⚠️ Чтобы подписка автоматически продлилась, пополните баланс на {price}₽ (стоимость вашей подписки)."
                             await context.bot.send_message(uid, msg)
                             if 'reminder_sent' not in sub:
                                 sub['reminder_sent'] = {}
@@ -364,26 +415,29 @@ async def show_main_menu(update_or_query, context, user_id=None):
         client_uuid = active_sub.get('uuid')
         if client_uuid:
             try:
-                servers = get_servers()
-                if servers:
-                    main_server = servers[0]
-                    usage = get_client_usage(main_server, client_uuid)
-                    if usage:
-                        online = usage.get('online', 0)
-                        text += f"\n📱 Подключено устройств: {online}/{MAX_DEVICES}"
-                        if online >= MAX_DEVICES:
-                            text += f" ⚠️ ЛИМИТ ДОСТИГНУТ!"
-                    else:
-                        text += f"\n📱 Устройства: Не удалось проверить"
+                device_check = check_device_limit(client_uuid, user_id)
+                
+                if device_check.get('blocked'):
+                    text += (
+                        f"\n🚫 <b>ПРЕВЫШЕНО КОЛИЧЕСТВО УСТРОЙСТВ!</b>\n"
+                        f"📱 Подключено устройств: {device_check.get('online', 0)}/{MAX_DEVICES}\n"
+                        f"⚠️ Уберите одно или более устройств, "
+                        f"чтобы не превышало более 3-ех!\n"
+                        f"После этих действий подписка снова будет работать.\n"
+                    )
+                else:
+                    online = device_check.get('online', 0)
+                    text += f"\n📱 Подключено устройств: {online}/{MAX_DEVICES}"
+                    if online >= MAX_DEVICES:
+                        text += f" ⚠️ ДОСТИГНУТ ЛИМИТ!"
             except Exception as e:
                 logging.error(f"Ошибка проверки устройств: {e}")
-                text += f"\n📱 Устройства: Не удалось проверить"
         
         expiry_date = datetime.fromisoformat(active_sub['expiry_date'])
         if expiry_date > datetime.now():
             text += f"\n📅 Статус: ✅ Активна\n⏳ Действует до: {expiry_date.strftime('%d.%m.%Y %H:%M')}\n📆 Осталось дней: {days_left}"
         else:
-            text += f"\n📅 Статус: ❌ Истекла\n\n⚠️ Подписка истекла. Продлите её."
+            text += f"\n📅 Статус: ❌ Истекла"
     else:
         text += f"🔑 Ваша подписка:\n❌ Нет активной подписки\n\n⚠️ Подписка истекла. Продлите её."
     
@@ -535,34 +589,9 @@ async def successful_payment_handler(update, context):
             days = 30
             stars_amount = amount_stars
     
-    user_data = get_user(user_id)
     result = create_subscription(None, user_id, days, f"User {user_id} (Stars)")
     
     if result['success']:
-        if 'subscriptions' not in user_data:
-            user_data['subscriptions'] = []
-        
-        user_data['subscriptions'].append({
-            'purchase_date': datetime.now().isoformat(),
-            'expiry_date': datetime.fromtimestamp(result['expiry_date']/1000).isoformat(),
-            'days': days,
-            'sub_link': result['sub_link'],
-            'client_id': result['client_id'],
-            'client_number': result.get('client_number'),
-            'email': result.get('email'),
-            'servers': result.get('servers', []),
-            'servers_count': result.get('servers_count', 1),
-            'warning_sent': False,
-            'is_free': False,
-            'totalGB': 0,
-            'usedGB': 0,
-            'uuid': result.get('uuid'),
-            'blocked': False,
-            'blocked_reason': None,
-            'blocked_date': None
-        })
-        save_user(user_id, user_data)
-        
         for server in get_servers():
             update_server_used_slots(server['id'])
         
@@ -644,30 +673,6 @@ async def pay_from_balance(query, context):
     result = create_subscription(None, user_id, days, f"User {user_id}")
     
     if result['success']:
-        if 'subscriptions' not in user_data:
-            user_data['subscriptions'] = []
-        
-        user_data['subscriptions'].append({
-            'purchase_date': datetime.now().isoformat(),
-            'expiry_date': datetime.fromtimestamp(result['expiry_date']/1000).isoformat(),
-            'days': days,
-            'sub_link': result['sub_link'],
-            'client_id': result['client_id'],
-            'client_number': result.get('client_number'),
-            'email': result.get('email'),
-            'servers': result.get('servers', []),
-            'servers_count': result.get('servers_count', 1),
-            'warning_sent': False,
-            'is_free': False,
-            'totalGB': 0,
-            'usedGB': 0,
-            'uuid': result.get('uuid'),
-            'blocked': False,
-            'blocked_reason': None,
-            'blocked_date': None
-        })
-        save_user(user_id, user_data)
-        
         for server in get_servers():
             update_server_used_slots(server['id'])
         
@@ -772,29 +777,6 @@ async def free_sub(query, context):
     
     if result['success']:
         user_data = get_user(user_id)
-        if 'subscriptions' not in user_data:
-            user_data['subscriptions'] = []
-        
-        user_data['subscriptions'].append({
-            'purchase_date': datetime.now().isoformat(),
-            'expiry_date': datetime.fromtimestamp(result['expiry_date']/1000).isoformat(),
-            'days': FREE_PERIOD_DAYS,
-            'sub_link': result['sub_link'],
-            'client_id': result['client_id'],
-            'client_number': result.get('client_number'),
-            'email': result.get('email'),
-            'servers': result.get('servers', []),
-            'servers_count': result.get('servers_count', 1),
-            'is_free': True,
-            'warning_sent': False,
-            'totalGB': 0,
-            'usedGB': 0,
-            'uuid': result.get('uuid'),
-            'blocked': False,
-            'blocked_reason': None,
-            'blocked_date': None
-        })
-        
         user_data['got_free'] = True
         save_user(user_id, user_data)
         
@@ -864,15 +846,18 @@ async def my_subs(query, context):
         client_uuid = s.get('uuid')
         if client_uuid:
             try:
-                servers = get_servers()
-                if servers:
-                    main_server = servers[0]
-                    usage = get_client_usage(main_server, client_uuid)
-                    if usage:
-                        online = usage.get('online', 0)
-                        text += f"📱 Устройств: {online}/{MAX_DEVICES}\n"
-                    else:
-                        text += f"📱 Устройств: N/A\n"
+                device_check = check_device_limit(client_uuid, user_id)
+                
+                if device_check.get('blocked'):
+                    text += (
+                        f"🚫 <b>ПРЕВЫШЕНО УСТРОЙСТВ!</b>\n"
+                        f"📱 Подключено: {device_check.get('online', 0)}/{MAX_DEVICES}\n"
+                        f"⚠️ Уберите одно или более устройств, "
+                        f"чтобы не превышало более 3-ех!\n"
+                    )
+                else:
+                    online = device_check.get('online', 0)
+                    text += f"📱 Устройств: {online}/{MAX_DEVICES}\n"
             except:
                 text += f"📱 Устройств: N/A\n"
         text += "\n"
@@ -1214,29 +1199,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         result = create_subscription(None, target_user_id, pending['days'], f"User {target_user_id}")
         if result['success']:
-            user_data = get_user(target_user_id)
-            if 'subscriptions' not in user_data:
-                user_data['subscriptions'] = []
-            user_data['subscriptions'].append({
-                'purchase_date': datetime.now().isoformat(),
-                'expiry_date': datetime.fromtimestamp(result['expiry_date']/1000).isoformat(),
-                'days': pending['days'],
-                'sub_link': result['sub_link'],
-                'client_id': result['client_id'],
-                'client_number': result.get('client_number'),
-                'email': result.get('email'),
-                'servers': result.get('servers', []),
-                'servers_count': result.get('servers_count', 1),
-                'warning_sent': False,
-                'is_free': False,
-                'totalGB': 0,
-                'usedGB': 0,
-                'uuid': result.get('uuid'),
-                'blocked': False,
-                'blocked_reason': None,
-                'blocked_date': None
-            })
-            save_user(target_user_id, user_data)
             remove_pending(target_user_id)
             for server in get_servers():
                 update_server_used_slots(server['id'])
