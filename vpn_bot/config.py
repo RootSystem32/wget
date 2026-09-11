@@ -36,3 +36,6 @@ CHANNEL_LINK = "https://t.me/"
 # Раскомментируй если нужен прокси
 # PROXY_URL = "socks5://user:pass@ip:port"
 PROXY_URL = None
+
+# Лимит устройств
+MAX_DEVICES = 3  
