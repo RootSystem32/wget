@@ -52,3 +52,15 @@ server {
         return 404;
     }
 }
+
+
+
+
+
+
+
+АКТИВАЦИЯ 
+
+ln -sf /etc/nginx/sites-available/dubikvpn-pay /etc/nginx/sites-enabled/
+nginx -t
+systemctl reload nginx
