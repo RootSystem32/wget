@@ -1,0 +1,16 @@
+nano /etc/systemd/system/dubikvpn-webhook.service
+
+[Unit]
+Description=DubikVPN Lava Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/bot
+ExecStart=/root/venv/bin/python3 /root/bot/webhook_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
