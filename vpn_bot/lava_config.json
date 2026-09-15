@@ -1,0 +1,9 @@
+{
+  "shop_id": "",
+  "secret_key": "",
+  "additional_key": "",
+  "webhook_url": "",
+  "success_url": "",
+  "fail_url": "",
+  "expire_minutes": 300
+}
